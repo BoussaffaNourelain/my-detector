@@ -85,3 +85,35 @@ What I asked the AI assistant, what I checked, and what I changed. A few lines p
 - Notebook setup cell (cell 2): `print("Folder:", ROOT)` became `print("Folder:", ROOT.name)`, so the output shows
   only the folder name instead of the machine-specific Windows path.
 - LOG.md: corrected two wordings (how I reviewed the images, and when the notebook was last executed).
+
+### Assignment 1.2: boundary detection (31 Oct 2026, Claude Code)
+
+**What I asked**
+- Inspect the Part B instructions and plan the missing work (B5, B6 and six written sections).
+- Measure candidate regions and design B5 (operators disagree) and B6 (every operator fails), then add the two cells.
+- For each written section, report what the saved outputs show; then insert my texts.
+- Validate, update this log, export to HTML, and commit and push.
+
+**What I checked**
+- The B5 and B6 crops were chosen from measured operator responses and previews; their code was tested outside the
+  notebook before insertion, and the notebook printed the same numbers.
+- For each written section the assistant reported measurements (for example: Gy stronger than Gx in all three images;
+  bottle_1 concrete and bottle edge give Laplacian means 5.3 and 5.2; bottle_2's outline gradient peaks at 66, below
+  every Canny high threshold). I reviewed them before writing.
+- The assistant flagged that my first cell 33 draft attributed the bottle_2 failure to the image's strongest gradient
+  (332, a rib highlight); I corrected it to the outline's own peak (66), and I named the (100, 200) pair in the
+  bottle_3 sentence.
+- Final validation: the notebook executed with nbconvert (kernel mai630), 16 of 16 code cells, 32 figures, 0 errors;
+  `python -m pytest -q tests` gave 13 passed; `check_setup.py` printed READY; Assignment 1.1 cells 0 to 24 have the
+  same text and outputs as the Assignment 1.1 commit.
+
+**What I changed**
+- B1 to B4 code was not changed; `src/classical.py` and the tests were not changed.
+- Notebook B5 (cell 37): `bottle_1.jpg` crop (x1, y1, x2, y2) = (0, 260, 140, 400), concrete texture next to the
+  bottle's left edge; colour crop, Sobel, Laplacian (x8 for display only), Canny (30, 90) and (100, 200), plus mean
+  responses and Canny percentages for a concrete region and a bottle-edge strip.
+- Notebook B6 (cell 40): `bottle_2.jpg` crop (0, 400, 140, 540), the transparent outline on the orange background;
+  colour and grey crops, Sobel, Laplacian (x8), Canny (30, 90), the same region numbers, and grey values along row 470.
+- Written sections (cells 27, 30, 33, 38, 41, 43: Sobel, Laplacian, Canny, B5, B6 and the final comparison): the
+  assistant gave measurements and sentence starters; I provided the texts and the assistant inserted them unchanged.
+- HTML export `A1_2_Boussaffa_Nour_El_Ain_MAI630.html` in the project root, for Moodle (not committed).
