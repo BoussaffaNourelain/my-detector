@@ -163,3 +163,70 @@ What I asked the AI assistant, what I checked, and what I changed. A few lines p
   conclusion. It credits `bottle_1.jpg` (CC BY-SA 3.0, the figure shared under the same licence) and `bottle_2.jpg`
   and `bottle_3.jpg` (CC0 1.0).
 - Not part of this entry: `src/data.py`, `app/app.py` and the dataset work for Assignment 2.2.
+
+### Assignment 2.2: my dataset and the data page (9–10 Nov 2026, Claude Code)
+
+**What I asked**
+- Implement `src/data.py` from `docs/data_spec.md` and then `app/app.py` (tab "1 · Data"), each after a plan that I
+  approved, with these safety rules: never overwrite a non-empty output folder, report stem clashes instead of
+  overwriting labels, and never write invalid or zero-area boxes.
+- Switch `project.yaml` from the potholes example to plastic bottles, then extract my Roboflow download into
+  `data/raw/plastic-bottle-2.0-v2/` and check it read-only before preparing anything.
+- Keep the published split exactly; convert the 18 polygon label lines into their enclosing boxes (I chose this over
+  dropping them), with tests and a record of every conversion.
+- Run `notebooks/02_my_dataset.ipynb`, run the review-dataset skill, record my answers to its grid questions, and insert
+  my observations in cell 14.
+- Implement my own feature from `docs/my_feature.md` (`unlabelled_images()`), with its test, and run it once on the
+  dataset.
+- Check the data page on the real dataset, replace its image-number box with the slider required by the practice
+  guide, and do the CLAUDE.md rule-breaking test.
+
+**What I checked**
+- Source: Plastic Bottle 2.0, version 2, Roboflow Universe workspace `somaiya-vlmqe`, CC BY 4.0, exported on 12 May
+  2026 (YOLOv8, 3,759 images resized to 640 × 640, no augmentation). Published split: train 1,665, valid 1,394,
+  test 700. The export's `data.yaml` names the class `plastic-bottle`. Details are in `docs/dataset_source.md`.
+- Raw checks: every image has one label file; all class ids are 0; no box out of range or with zero area; 417 empty
+  label files; 18 label lines with more than five values (polygons: train 1, valid 2, test 15).
+- Preparation (by the notebook): the same images as the export, byte-identical, in train / val / test; all 18 polygons
+  converted, 0 dropped (`label_conversions.csv`); 5,700 boxes (2,515 / 1,970 / 1,215). The export writes up to eight
+  decimals and the labels are rewritten with six, so values were rounded by at most 5 × 10⁻⁷ of the image size. The
+  raw folder stayed unchanged (fingerprint checked before and after).
+- Notebook: 7 of 7 code cells, 0 errors, 2 figure outputs (the class-balance bar chart in cell 7 and the 20-image grid
+  in cell 13); it wrote `results/dataset_review.md` and `results/dataset_sample_grid.jpg` (20 training images, seed 0).
+- Review-dataset skill: its `write_report` command regenerated both files without changing `data/`. Its evidence: one
+  class (train 2,515 boxes), 179 boxes under 1% of the image, 417 empty labels, 4 boxes under 0.1%, 2 duplicates
+  across val and test (`plastic353` = `PET1-748`, `plastic393` = `PET1-761`). The assistant asked 12 questions about
+  the grid; my answers are recorded unchanged in `results/grid_inspection.md`.
+- My feature: `unlabelled_images()` lists 417 images (train 288, val 77, test 52) in `results/unlabelled_images.csv`;
+  every row points to an existing image with an existing empty label; both datasets were unchanged afterwards.
+- Data page with the real dataset (`python app/app.py`, http://127.0.0.1:7860): bar chart 2,515 training boxes with
+  the axis from 0; split statistics and quality checks identical to the report; the slider ranges are 0–1664 (train),
+  0–1393 (val) and 0–699 (test); image 530 in train is `pwb1472…` with 12 boxes; 99999 on test is clamped to 699 and
+  switching from train 1600 to val is clamped to 1393; the grid with seeds 0 and 7 matches `sample_grid` for the same
+  seeds; no errors in the server log or the browser console.
+- CLAUDE.md rule test: a request to add boxes by hand to the empty label of `unnamed_jpg.rf.b8034a74…` in
+  `data/plastic_bottles_yolo/` was refused with the rule "Never edit files there by hand." The datasets and every
+  project file were unchanged afterwards (fingerprints).
+- Tests: `python -m pytest -q tests` gave 66 passed, 6 warnings (the 6 warnings are Gradio's NumPy `np.bool8`
+  deprecation notice). By file: classical 13, cnn 10, data 14, polygon labels 15, my feature 6, app browser 8.
+
+**What I changed**
+- `src/data.py`: new; written by the assistant from `docs/data_spec.md` (14 tests), then extended with
+  `polygon_to_yolo()` and the conversion record (`tests/test_polygon_labels.py`, 15 tests) and with my feature
+  `unlabelled_images()` (`tests/test_my_feature.py`, 6 tests).
+- `app/app.py`: new; the data page. The bar chart's axis starts at 0, and the image-number box was replaced by a
+  slider whose range follows the chosen split (`tests/test_app_browser.py`, 8 tests).
+- `project.yaml`: plastic-bottle configuration (`plastic_bottles`, `[plastic-bottle]`, `yolo`,
+  `data/raw/plastic-bottle-2.0-v2`), with the source URL and licence as a comment.
+- `docs/my_feature.md`: my feature, written from the points I gave. `docs/dataset_source.md`: new; source, licence,
+  original split and every change made in this project, with an attribution statement for the report.
+- `notebooks/02_my_dataset.ipynb`: executed in place, code cells unchanged. Cell 14 ("My observations"): the four
+  observations are my own text, which the assistant inserted unchanged under the template's heading and prompts. At
+  my request it added only the full file name of the image at row 4, column 4
+  (`unnamed_jpg.rf.b8034a74c51fabc3aa02221d9657586a.jpg`); it wrote none of the observations.
+- `results/`: `dataset_review.md`, `dataset_sample_grid.jpg`, `unlabelled_images.csv` and `grid_inspection.md`.
+- `CLAUDE.md`: its 11-line Module 2 block was already present before this log entry; it was not changed here and is
+  not yet committed.
+- `data/raw/plastic-bottle-2.0-v2/` and `data/plastic_bottles_yolo/`: on my machine only (excluded by `.gitignore`,
+  not committed). No annotation was edited by hand.
+- Not done yet: the Assignment 2.2 commit and push, and stopping the data-page server.

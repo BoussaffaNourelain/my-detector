@@ -1,0 +1,9 @@
+# My project (Module 2): plastic-bottle detection.
+# Dataset: Plastic Bottle 2.0, version 2, by somaiya-vlmqe on Roboflow Universe, licensed CC BY 4.0
+# https://universe.roboflow.com/somaiya-vlmqe/plastic-bottle-2.0-psuby/dataset/2
+# YOLOv8 export; its published train / valid / test split is kept exactly as downloaded.
+name: plastic_bottles                # short, no spaces: the dataset goes to data/plastic_bottles_yolo
+classes: [plastic-bottle]            # must match the names in the export's data.yaml exactly
+format: yolo                         # voc | coco | yolo  (how YOUR dataset writes its boxes)
+source:
+  folder: data/raw/plastic-bottle-2.0-v2   # the folder that holds train/ valid/ test/
