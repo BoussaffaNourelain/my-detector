@@ -230,3 +230,85 @@ What I asked the AI assistant, what I checked, and what I changed. A few lines p
 - `data/raw/plastic-bottle-2.0-v2/` and `data/plastic_bottles_yolo/`: on my machine only (excluded by `.gitignore`,
   not committed). No annotation was edited by hand.
 - Not done yet: the Assignment 2.2 commit and push, and stopping the data-page server.
+
+## Module 3
+
+### Assignment 3.1: preparing the training experiment (12 Nov 2026, Claude Code)
+
+**What I asked**
+- Append `docs/CLAUDE_module3.md` to the end of CLAUDE.md, check `.gitignore` for `runs/` and `*.pt`, run the tests
+  and check `data/plastic_bottles_yolo/`.
+- Insert my data choice, reason and prediction into the first three fields of `docs/experiment.md`.
+- Challenge my reasoning with real box counts and box sizes from the dataset, in at most three questions, without
+  answering them for me.
+
+**What I checked**
+- `.gitignore` already contained `runs/` and `*.pt`. `python -m pytest -q tests` stopped at collection because
+  `src/train.py` and `src/evaluate.py` do not exist yet; without `tests/test_train.py` and `tests/test_evaluate.py`,
+  66 passed.
+- Dataset: 640 × 640 images; train 1,665 images / 2,515 boxes, val 1,394 / 1,970, test 700 / 1,215.
+- Findings from the box statistics (read-only script, COCO size limits in pixels):
+  - Only 2 of the 1,215 test boxes are small (under 32 × 32 pixels).
+  - 29.8% of test boxes touch an image edge, compared with 24% in training.
+  - Crowded images (more than 5 bottles) are 5.3% of test images, compared with 3.1% in training.
+  - A single run cannot prove that "all" performs better than "half" or "large only".
+- The three questions the assistant raised:
+  1. With only 2 small bottles in the test set, what evidence would show whether the model struggles with small
+     bottles?
+  2. About 30% of test boxes touch an image edge. How will I look at those boxes separately from the overall mAP?
+  3. If more examples help, what result from a single run would show that "all" was better than "half" or "large
+     only", and what result would show it was not?
+
+**What I changed**
+- `CLAUDE.md`: the Module 3 block from `docs/CLAUDE_module3.md` appended at the end; existing rules unchanged.
+- `docs/experiment.md`: the first three fields hold my choice, reason and prediction, inserted unchanged by the
+  assistant. The after-training fields are empty.
+- My decision after the review: I kept "all" (the complete training dataset).
+- Not done yet: `src/train.py`, the "2 · Training" page and the training run.
+
+### Assignment 3.1: `src/train.py` and the page "2 · Training" (12 Nov 2026, Claude Code)
+
+**What I asked**
+- Implement `src/train.py` from `docs/train_spec.md` and the page "2 · Training" in `app/app.py`, following the plan I
+  approved, with training in a separate process so the page stays responsive.
+- Use the Windows workaround for `test_one_class` only if it was required, and document it.
+- Keep every Module 2 test; change only the event-count assertion in `tests/test_app_browser.py` so that it checks
+  the tab "1 · Data" on its own.
+- Create `tests/test_app_training.py` with fake processes. No real training, no weight download, no new packages.
+
+**What I checked**
+- Tests: `python -m pytest -q tests/test_train.py` gave 10 passed; `python -m pytest -q tests/test_app_training.py`
+  gave 19 passed.
+- The full `python -m pytest -q tests` stops at collection because `tests/test_evaluate.py` imports
+  `src/evaluate.py`, which does not exist yet. Without that file, 95 passed, 8 warnings (Gradio's NumPy `np.bool8`
+  deprecation notice). By file: classical 13, cnn 10, data 14, polygon labels 15, my feature 6, app browser 8,
+  train 10, app training 19.
+- Windows workaround: with the extra label write switched off, `test_one_class` failed with `FileNotFoundError` on
+  `subsets\one_class\images\val\v.txt`; with it, all 10 tests in `tests/test_train.py` passed.
+- Before the event-count assertion was changed, adding the tab made only `test_events_declare_matching_outputs` fail
+  (7 of 8 passed); after the change, 8 of 8 passed.
+- Training tab in the real app (`python app/app.py`, http://127.0.0.1:7860), without pressing Start training: the
+  tab loads; "all" showed 1665 of 1665 training images and "large" showed 1350 of 1665; the run name changed to
+  `large_e30_s416`; no errors in the browser console or the server log. The generated `train.txt` files have 1,665
+  lines (all), 832 (half) and 1,350 (large).
+- After this check: no `runs/` folder and no `.pt` file in the project; `subsets/all`, `subsets/half` and
+  `subsets/large` were written inside `data/plastic_bottles_yolo/`, as the spec says.
+
+**What I changed**
+- `src/train.py`: new; written by the assistant from `docs/train_spec.md`, with the seven functions of the spec.
+  `launch()` starts the training with `subprocess.Popen` and returns the process at once; the output goes to
+  `runs/<name>.log`.
+- Windows workaround in `make_subset(..., "one_class")`: each filtered val and test label is also written next to its
+  copied image (`subsets/one_class/images/<split>/<stem>.txt`), because the test finds the label with
+  `str(path).replace("/images/", "/labels/")`, which does not match Windows paths with backslashes. Ultralytics
+  ignores these files and reads `labels/<split>/`. Documented in the docstring of `_one_class_copy`.
+- `app/app.py`: new tab "2 · Training": data choice and its image count, a "why" text box saved as
+  `runs/<name>_why.txt` before the training starts, epochs (30) and image size (416) as sliders, a run name, a Start
+  training button, and a status, table and chart refreshed every 5 seconds by a `gr.Timer`. Start refuses an empty
+  reason, an invalid or existing run name, and a second training while one is running. The tab "1 · Data" is
+  unchanged.
+- `tests/test_app_browser.py`: only `test_events_declare_matching_outputs` changed: it now keeps the events of the
+  tab "1 · Data" and checks them against the same three expected output lists. The other assertions are unchanged.
+- `tests/test_app_training.py`: new; 19 tests with fake processes for `launch()`, `train_command()` and the page.
+- No packages installed, no training started, no weights downloaded. `docs/experiment.md` was not changed.
+- Not done yet: `src/evaluate.py`, the real training run and the commit.

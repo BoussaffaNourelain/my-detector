@@ -52,10 +52,23 @@ def test_browser_uses_a_slider_with_the_train_range(project):
     assert [n.label for n in _components(demo, gr.Number)] == ["Seed"]                      # seed box kept, no number box
 
 
+def _ids_inside(block):
+    """The ids of every component inside a layout block (a tab, a row, ...)."""
+    ids = set()
+    for child in getattr(block, "children", []):
+        ids |= {child._id} | _ids_inside(child)
+    return ids
+
+
 def test_events_declare_matching_outputs(project):
     demo = myapp.build_app("project.yaml")
+    data_tab = [b for b in demo.blocks.values() if isinstance(b, gr.Tab) and b.label == "1 · Data"]
+    assert len(data_tab) == 1
+    data_ids = _ids_inside(data_tab[0])
     outputs = []
     for f in demo.fns.values():
+        if not any(block_id in data_ids for block_id, _ in f.targets):   # only the events of the tab "1 · Data"
+            continue
         outputs.append([getattr(b, "label", None) for b in f.outputs])
         if f.inputs and getattr(f.inputs[0], "label", None) == "Split":   # both browser events (split and slider)
             assert len(f.fn("val", 0)) == len(f.outputs)                  # callback returns as many values as outputs

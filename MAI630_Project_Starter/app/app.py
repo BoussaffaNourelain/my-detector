@@ -1,10 +1,11 @@
-"""The app of my detector. Module 2 adds the tab "1 · Data"; Modules 3 and 4 add more tabs to this file.
+"""The app of my detector. Module 2 adds the tab "1 · Data", Module 3 the tab "2 · Training"; Module 4 adds more.
 
-Run it from anywhere: python app/app.py. The dataset folder is found next to the project.yaml it reads.
-See docs/data_spec.md.
+Run it from anywhere: python app/app.py. The dataset folder and runs/ are found next to the project.yaml it reads.
+See docs/data_spec.md and docs/train_spec.md.
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -14,8 +15,15 @@ if str(ROOT) not in sys.path:
 
 import gradio as gr                                             # noqa: E402
 import pandas as pd                                             # noqa: E402
+from matplotlib.figure import Figure                           # noqa: E402
 
 from src import data as dt                                      # noqa: E402
+from src import train as tr                                     # noqa: E402
+
+# Trainings started from this app: run name -> {"process": Popen, "epochs": int}. Kept here, not in gr.State,
+# because Gradio copies State values and a process cannot be copied.
+RUNNING: dict[str, dict] = {}
+REFRESH_SECONDS = 5
 
 
 def dataset_dir(project_path: str | Path, project: dict) -> Path:
@@ -114,15 +122,166 @@ def _data_tab(root: Path, classes: list[str], project_path: Path) -> None:
     show_grid.click(lambda s: grid_view(root, classes, s), [seed], [grid])
 
 
+# ---------------------------------------------------------------- tab "2 · Training" (docs/train_spec.md)
+
+def runs_dir(project_path: str | Path) -> Path:
+    """runs/, next to project.yaml (not relative to the working directory)."""
+    return Path(project_path).resolve().parent / "runs"
+
+
+def default_run_name(choice: str, epochs, imgsz) -> str:
+    return f"{choice}_e{int(epochs)}_s{int(imgsz)}"
+
+
+def subset_count(root: Path, classes: list[str], choice: str, class_name: str | None) -> str:
+    """How many training images a data choice means (writes root/subsets/<choice>/, as make_subset does)."""
+    try:
+        _, n = tr.make_subset(root, choice, classes, class_name=class_name)
+    except (ValueError, FileNotFoundError) as err:
+        return f"Cannot use {choice}: {err}"
+    total = len(_split_images(root, "train"))
+    return f"{n} of {total} training images"
+
+
+def _active_run() -> str | None:
+    """The name of a training started from this app that is still running, if any."""
+    for name, run in RUNNING.items():
+        if run["process"].poll() is None:
+            return name
+    return None
+
+
+def start_training(root: Path, classes: list[str], runs: Path, choice: str, class_name: str | None,
+                   why: str, epochs, imgsz, name: str) -> tuple:
+    """Check the inputs, save the reason, start the training in a separate process and return at once.
+
+    -> (status text, run name, timer update, start-button update). Raises gr.Error when the inputs are not valid.
+    """
+    why, name = (why or "").strip(), (name or "").strip()
+    if not why:
+        raise gr.Error("Write why you chose this data before you start.")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        raise gr.Error("The run name may use only letters, digits, '_', '-' and '.'.")
+    runs = Path(runs)
+    if (runs / name).exists() or (runs / f"{name}.log").exists():
+        raise gr.Error(f"runs/{name} already exists: choose another run name.")
+    if (busy := _active_run()) is not None:
+        raise gr.Error(f"The training {busy} is still running.")
+    yaml_path, n = tr.make_subset(root, choice, classes, class_name=class_name)
+    if n == 0:
+        raise gr.Error(f"The choice {choice} has no training images.")
+
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / f"{name}_why.txt").write_text(
+        f"run: {name}\ndata: {choice}" + (f" ({class_name})" if choice == "one_class" else "") +
+        f", {n} training images\nepochs: {int(epochs)}\nimage size: {int(imgsz)}\n\nWhy I chose it:\n{why}\n",
+        encoding="utf-8")
+    process = tr.launch(yaml_path, int(epochs), int(imgsz), name, runs=runs)
+    RUNNING[name] = {"process": process, "epochs": int(epochs)}
+    status = f"Started {name}: {choice}, {n} training images, {int(epochs)} epochs, image size {int(imgsz)}."
+    return status, name, gr.Timer(active=True), gr.Button(interactive=False)
+
+
+def progress_chart(rows: list[dict]) -> Figure | None:
+    """Box losses and mAP50 per epoch."""
+    if not rows:
+        return None
+    epochs = [r["epoch"] for r in rows]
+    fig = Figure(figsize=(9, 3.5))
+    loss, m = fig.subplots(1, 2)
+    loss.plot(epochs, [r["train_loss"] for r in rows], marker="o", label="train box loss")
+    loss.plot(epochs, [r["val_loss"] for r in rows], marker="o", label="val box loss")
+    loss.set(xlabel="epoch", ylabel="box loss", title="Losses")
+    loss.legend()
+    m.plot(epochs, [r["mAP50"] for r in rows], marker="o", color="tab:green")
+    m.set(xlabel="epoch", ylabel="mAP50", title="mAP50 (validation)", ylim=(0, 1))
+    fig.tight_layout()
+    return fig
+
+
+def _status(name: str, rows: list[dict], code: int | None, planned: int | None, runs: Path) -> str:
+    lines = []
+    if code is None:
+        lines.append(f"{name}: training, {len(rows)} of {planned} epochs finished." if planned
+                     else f"{name}: training, {len(rows)} epochs finished.")
+        if rows and planned:
+            per_epoch = rows[-1]["seconds"] / len(rows)
+            lines.append(f"About {tr.estimate_minutes(per_epoch, planned)} minutes in total "
+                         f"({tr.estimate_minutes(per_epoch, planned - len(rows))} left).")
+    else:
+        lines.append(f"{name}: finished (exit code {code})." if code == 0 else
+                     f"{name}: stopped with exit code {code}. See runs/{name}.log.")
+    if (s := tr.summarize(rows)):
+        lines.append(f"{s['epochs']} epochs, {s['minutes']} minutes, best mAP50 {s['best_mAP50']:.3f} at epoch "
+                     f"{s['best_epoch']}, overfitting: {'yes' if s['overfitting'] else 'no'}.")
+    if code is not None and (w := tr.best_weights(runs / name)):
+        lines.append(f"Best weights: {w}")
+    return "\n".join(lines)
+
+
+def poll_progress(runs: Path, name: str) -> tuple:
+    """Read the run's progress -> (status, table, chart, timer update, start-button update). Called by the timer."""
+    if not name:
+        return "No training started yet.", None, None, gr.Timer(active=False), gr.Button(interactive=True)
+    runs = Path(runs)
+    rows = tr.read_progress(runs / name)
+    run = RUNNING.get(name)
+    code = run["process"].poll() if run else 0                # a run not started here is treated as finished
+    status = _status(name, rows, code, run["epochs"] if run else None, runs)
+    table = pd.DataFrame(rows) if rows else None
+    running = code is None
+    return status, table, progress_chart(rows), gr.Timer(active=running), gr.Button(interactive=not running)
+
+
+def _training_tab(root: Path, classes: list[str], project_path: Path) -> None:
+    if not root.is_dir():
+        gr.Markdown(f"The dataset folder `{root}` does not exist yet. Prepare it on the tab 1 · Data first.")
+        return
+    runs = runs_dir(project_path)
+
+    gr.Markdown("### 1. The training data")
+    with gr.Row():
+        choice = gr.Radio(list(tr.CHOICES), value="all", label="Training data")
+        class_name = gr.Dropdown(classes, value=classes[0], label="Class (only for one_class)")
+    count = gr.Textbox(value=subset_count(root, classes, "all", classes[0]), label="Training images",
+                       interactive=False)
+    gr.Markdown("### 2. Why I chose it")
+    why = gr.Textbox(label="Why I chose this data", lines=3, placeholder="Saved as runs/<run name>_why.txt")
+    gr.Markdown("### 3. The training")
+    with gr.Row():
+        epochs = gr.Slider(minimum=1, maximum=100, step=1, value=30, label="Epochs")
+        imgsz = gr.Slider(minimum=320, maximum=640, step=32, value=416, label="Image size")
+        name = gr.Textbox(value=default_run_name("all", 30, 416), label="Run name")
+    start = gr.Button("Start training", variant="primary")
+    gr.Markdown("### 4. Progress")
+    status = gr.Textbox(label="Status", lines=4, interactive=False)
+    chart = gr.Plot(label="Losses and mAP50")
+    table = gr.Dataframe(label="Progress per epoch", interactive=False)
+    run_name = gr.State("")
+    timer = gr.Timer(REFRESH_SECONDS, active=False)
+
+    choice.change(lambda c, k: subset_count(root, classes, c, k), [choice, class_name], [count])
+    class_name.change(lambda c, k: subset_count(root, classes, c, k) if c == "one_class" else gr.skip(),
+                      [choice, class_name], [count])
+    for box in (choice, epochs, imgsz):
+        box.change(default_run_name, [choice, epochs, imgsz], [name])
+    start.click(lambda *a: start_training(root, classes, runs, *a),
+                [choice, class_name, why, epochs, imgsz, name], [status, run_name, timer, start])
+    timer.tick(lambda n: poll_progress(runs, n), [run_name], [status, table, chart, timer, start])
+
+
 def build_app(project_path: str | Path = "project.yaml") -> gr.Blocks:
     """The Gradio app for the project described in project_path."""
     project_path = Path(project_path)
     project = dt.load_project(project_path)
     classes = project["classes"]
+    root = dataset_dir(project_path, project)
     with gr.Blocks(title=f"My detector: {project['name']}") as demo:
         gr.Markdown(f"# My detector: {project['name']}\nClasses: {', '.join(classes)}")
         with gr.Tab("1 · Data"):
-            _data_tab(dataset_dir(project_path, project), classes, project_path)
+            _data_tab(root, classes, project_path)
+        with gr.Tab("2 · Training"):
+            _training_tab(root, classes, project_path)
     return demo
 
 
