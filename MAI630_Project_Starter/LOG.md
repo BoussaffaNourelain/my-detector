@@ -312,3 +312,74 @@ What I asked the AI assistant, what I checked, and what I changed. A few lines p
 - `tests/test_app_training.py`: new; 19 tests with fake processes for `launch()`, `train_command()` and the page.
 - No packages installed, no training started, no weights downloaded. `docs/experiment.md` was not changed.
 - Not done yet: `src/evaluate.py`, the real training run and the commit.
+
+### Assignment 3.1: the training run and its evaluation (14 Nov 2026, Claude Code and Google Colab)
+
+**Work completed**
+- Ran a 2-epoch trial from the page "2 · Training" on my laptop CPU (`all_e2_s416_retry1`) to check the page end to
+  end. An earlier attempt, `all_e2_s416_test` (12 Nov), was interrupted before it finished: its log ends with a
+  `KeyboardInterrupt` traceback and it has no `results.csv`.
+- Asked Claude to explain the trial with the `explain-run` skill.
+- The local 2-epoch trial took about 21.3 minutes, so I moved the full experiment to Google Colab to use its Tesla T4
+  GPU (Plan B in the practice guide). The final run, `all_e30_s416_colab`, completed 30 epochs in 22.2 minutes.
+- Asked Claude to plan and then implement `src/evaluate.py` from `docs/eval_spec.md`, and to run the tests and a real
+  evaluation on the test split.
+- Filled in the second part of `docs/experiment.md`; Claude inserted my figures and my interpretation unchanged.
+- Committed the work (`aeb1190b`, then `d0371442`) and prepared the Assignment 3.1 PDF.
+
+**Training configuration and experiment**
+- Trial run, local CPU (Intel Core i5-10300H), `all_e2_s416_retry1`: data `all` (1,665 training images), 2 epochs,
+  image size 416. It finished with exit code 0 after 21.3 minutes (about 10.6 minutes per epoch); best validation
+  mAP50 0.759 at epoch 2. This was a check of the page, not my final model.
+- What `explain-run` reported for the trial: validation losses fell at both epochs, mAP50 was still rising at the end,
+  `warmup_epochs` (3) was longer than the 2 epochs, and every metric came from the validation split, so the reported
+  results must come from the test split. Its question: what in these files could show whether the result was limited
+  by the amount of data or by the number of epochs.
+- I also asked Claude to run `explain-run` on the final Colab run. The analysis helped me verify the training
+  duration (22.2 minutes), the best epoch (29), the validation metrics (best mAP50 92.764%) and the training-loss
+  trends.
+- Final run, Google Colab, `all_e30_s416_colab`: YOLO26n, data `all` (1,665 training images), image size 416, batch
+  size 8, 30 epochs, Tesla T4 GPU. Training time 22.2 minutes.
+- Final run results (validation split, from its `results.csv`): best epoch 29, mAP50 0.92764 (92.764%), mAP50-95
+  0.80853 (80.853%). Training and validation box losses both peaked in the first epochs (epoch 4 and epoch 3) and
+  reached their lowest values at epoch 30 (0.631 and 0.623). Over the last five epochs mAP50 stayed between 0.925
+  and 0.928. `summarize()` overfitting flag: False.
+
+**Test-set evaluation**
+- Final model on the test split: 700 images, 1,215 ground-truth instances. Test mAP50 0.77842 (77.842%), test
+  mAP50-95 0.63546 (63.546%). Sources: `results/final_test_metrics.json` and `results/thresholds.json`.
+- Precision and recall at four confidence thresholds (TP / FP / FN out of 1,215 bottles):
+  - 0.10: precision 47.85%, recall 79.75% (969 / 1,056 / 246)
+  - 0.25: precision 73.82%, recall 74.98% (911 / 323 / 304)
+  - 0.50: precision 89.67%, recall 66.42% (807 / 93 / 408)
+  - 0.75: precision 96.66%, recall 57.20% (695 / 24 / 520)
+- The trade-off in these numbers: raising the threshold keeps only the more confident boxes. From 0.25 to 0.50 the
+  false alarms fall from 323 to 93 (230 fewer), but correct detections also fall from 911 to 807 (104 fewer), so
+  precision rises and recall drops. mAP50 does not depend on a threshold: it summarises all of them.
+- The test mAP50 (77.84%) is lower than the best validation mAP50 (92.76%).
+
+**Verification and project updates**
+- `src/evaluate.py`: new; written by Claude from the approved plan. `python -m pytest -q tests/test_evaluate.py`
+  gave 10 passed; the full `python -m pytest -q tests` gave 105 passed, 8 warnings (Gradio's NumPy `np.bool8`
+  deprecation notice).
+- Corrections found during this work: the virtual environment is at `../.venv`, not `.venv`; the test split has 700
+  images, not the 350 first estimated in the plan.
+- `yolo_metrics()` writes a temporary copy of `data.yaml` under `runs/` when the stored Windows path does not exist
+  (Colab or Linux); the original `data.yaml` was checked byte for byte and is unchanged.
+- `results/thresholds.json` still held the 2-epoch trial numbers after the Colab results were copied in. It was
+  replaced with the four Colab rows from `results/final_test_metrics.json` after checking that TP + FN = 1,215 at
+  every threshold and that precision and recall recompute exactly from the counts.
+- `results/examples.png` and `results/thresholds.png` are the Colab figures (byte-identical to the downloaded files).
+- `evidence/colab_training_evidence.png`: two Colab screenshots taken after training (the GPU, `args.yaml` values and
+  30 completed epochs; the run's `results.png`). There are no screenshots taken during the 30-epoch training.
+- Commits: `aeb1190b` (`src/evaluate.py` and the first results) and `d0371442` ("Complete Module 3 training and
+  evaluation"). `runs/`, `*.pt` and the dataset do not appear in `git status`.
+
+**Lessons learned and reflection**
+- From my interpretation in `docs/experiment.md`: my prediction was partly correct. Training with the complete
+  dataset helped the model learn useful visual features for detecting plastic bottles. However, the test mAP50 was
+  77.84%, compared with 92.76% on the validation set, which suggests that the model performed less effectively on
+  unseen images and highlights the challenge of generalization.
+- Also from `docs/experiment.md`: the confidence threshold affects the balance between precision and recall. At 0.50,
+  precision reached 89.67% while recall was 66.42%: fewer false positives, but more bottles missed. Choosing a
+  threshold depends on whether reducing false detections or finding more bottles is the priority.
