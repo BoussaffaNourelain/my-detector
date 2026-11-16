@@ -383,3 +383,79 @@ What I asked the AI assistant, what I checked, and what I changed. A few lines p
 - Also from `docs/experiment.md`: the confidence threshold affects the balance between precision and recall. At 0.50,
   precision reached 89.67% while recall was 66.42%: fewer false positives, but more bottles missed. Choosing a
   threshold depends on whether reducing false detections or finding more bottles is the priority.
+
+### Assignment 3.2: evaluation, images and report (16 Nov 2026, Claude Code)
+
+**What I asked**
+- Audit the 3.2 deliverables read-only, then run `notebooks/03_my_results.ipynb` on the final Colab model with the
+  Colab result files backed up first and restored afterwards.
+- Run the `image-auditor` subagent on `results/examples.png`, and make a separate, more readable copy of the figure.
+- Inspect every green box in the six example images at full resolution, to find one detection the metric accepts
+  that I would not accept.
+- Prepare `docs/my_report.md`, help me write my sections, and run the `metrics-reviewer` subagent on it.
+
+**What I checked**
+- Tests: `python -m pytest -q tests` gave 105 passed, 8 warnings (Gradio's `np.bool8` notice).
+- Notebook: `RUN = "detect/runs/all_e30_s416_colab"` (the only code change). Executed with nbconvert, kernel
+  mai630, on CPU: 4 of 4 code cells, 0 errors, 3 min 24 s.
+- The local run matches Colab exactly: mAP50 0.77842, mAP50-95 0.63546, and identical TP / FP / FN at all four
+  thresholds; `thresholds.json` was byte-identical. `what_changed` from 0.25 to 0.75: 216 correct and 299 wrong
+  detections removed. The six example images were the same; the PNGs differed only in font rendering.
+- Colab files restored: `thresholds.json`, `thresholds.png`, `examples.png` and `final_test_metrics.json` have their
+  original SHA-256 again (backup in `runs/colab_results_backup/`, git-ignored).
+- `image-auditor` grouped the mistakes into four types (a red and a yellow box on one object; false alarms on
+  possible non-bottles; false alarms on bottle-like objects; partly visible objects at the edges). It undercounted
+  the bottom row and marked its bag, cup and can readings as uncertain. The exact per-image counts at confidence 0.25
+  are: Correct 1–3 11/0/0, 7/0/0, 6/0/0; Wrong 1–3 10/19/16, 3/21/12, 18/17/12 (TP/FP/FN).
+- Box inspection (same model, `predict_images()` and `match()`, read-only script outside the project): the 24 green
+  boxes in the three correct images have IoU 0.844–0.988, with no clearly unacceptable box. In Wrong 1, box 6
+  (numbered by confidence) has confidence 0.61 and IoU 0.5095; predicted box (431, 345, 623, 515), label
+  (441, 372, 565, 506), area ratio 1.96; 51% of the box covers its own label, 77% overlaps the label of a
+  neighbouring bottle (475, 329, 635, 627), and 53% of that label lies inside the box. The neighbouring bottle is
+  matched separately by box 3 (470, 345, 634, 634; confidence 0.71, IoU 0.897).
+- `metrics-reviewer` on `results/thresholds.json` and `docs/my_report.md`: all numbers in Sections 1–4 match the
+  result files; the Section 3 differences table and the Section 5 arithmetic are correct. It raised 12 points:
+  1. Section 5 numbers were not traceable to any file, and Wrong 1 has two green boxes at 0.61 and two at 0.71.
+  2. IoU 0.510 vs 0.509 when recomputed from the rounded coordinates.
+  3. "It does not check how much extra area the box includes" is wrong: the extra area is in the IoU union.
+  4. The box fails at IoU 0.55–0.95, so mAP50-95 already penalises it.
+  5. A false positive at IoU 0.5 can also be a badly placed box on a real bottle, not only a non-bottle.
+  6. Section 3 gives no number for what I lose (230 more FPs, precision 89.67% to 73.82%) and does not say why
+     not 0.10.
+  7. "It could end up in general waste" is an assumption about the use case, not in any file.
+  8. The wrong examples are crowded by construction (most FP + FN); 5.3% of test is about 37 images and 3.1% of
+     train about 52, so crowding is not shown to cause errors.
+  9. The edge-box percentages show a different distribution, not worse performance.
+  10. Wrong 1, box 6 is a loose true positive, so it fits proposal 3 (label quality) better than proposal 1.
+  11. Not used: 15 of the 18 polygon conversions are in the test split, and 52 test images have empty labels.
+  12. "Images used during training": validation selects `best.pt`; 2 shared images out of 700.
+
+**What I changed**
+- `notebooks/03_my_results.ipynb`: `RUN` set to the Colab run; executed, outputs saved.
+- `results/examples_readable.png`: new; the same six images, predictions and scores as `examples.png`, with short
+  titles, exact counts, a legend and labels kept inside the image. `results/examples.png` is unchanged.
+- `docs/my_report.md`: new. Sections 1, 2 and 4 and the facts in Sections 5 and 6 were prepared by Claude from
+  the verified files. Section 3 is my own text, inserted word for word. The prose of Sections 5 and 6 was drafted
+  by Claude from the judgment and the four recommendations I gave, then I edited proposal 1.
+- Reviewer points accepted (factual or technical corrections, made by Claude): 1 (Section 5 now says how the values
+  were measured, identifies box 6 among the two 0.61 boxes, and gives box 3's coordinates), 2 (the table gives
+  0.5095 unrounded and 0.509 from the rounded coordinates), 3 (the sentence now says the extra area lowers the IoU,
+  but the metric does not check whether it belongs to another object).
+- Reviewer points 4–12: I decided how to address each one and gave the recommendations; Claude applied them:
+  - 4: Section 5 now says that mAP50-95 penalises box 6 (a match only at IoU 0.50, a miss at 0.55–0.95), while only
+    the image shows that its extra area covers a neighbouring bottle.
+  - 5, 6, 7: Section 3 already states that false positives include badly placed boxes on real bottles, gives the
+    exact trade-offs (0.10 → 0.25: 733 fewer FPs, 58 more FNs; 0.25 → 0.50: 230 fewer FPs, 104 more FNs), and
+    describes the recycling outcome as a possible consequence of my assumed use case. My choice of 0.25 and my
+    priority (avoiding missed bottles) are unchanged; Section 3 was not edited.
+  - 8: Proposal 1 corrected. Recounted from `data/plastic_bottles_yolo/labels/` (read-only): images with more than
+    5 bottles are 37 of 700 test images (5.3%) and 51 of 1,665 training images (3.1%; the reviewer's estimate was
+    about 52). The three wrong examples are no longer used as evidence of a general pattern.
+  - 9: Proposal 2 now describes the edge-box percentages as a difference in distribution, not worse performance.
+  - 10: Wrong 1, box 6 moved from proposal 1 to proposal 3, as a localization and annotation-quality issue.
+  - 11: The 15 test polygon conversions were checked against this log (train 1, valid 2, test 15) and
+    `label_conversions.csv` (18 rows: test 15, val 2, train 1) before being added to the facts and proposal 3. The 52
+    empty test labels are still described as to be checked, not as annotation errors.
+  - 12: Proposal 4 now says that validation is used for model selection (`best.pt`), so the 2 shared images weaken
+    the test split's independence; it no longer says they were used for training.
+- Not done yet: the commit and push, and `A3_2_Boussaffa_Nour_El_Ain_MAI630.pdf`.
