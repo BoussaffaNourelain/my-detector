@@ -53,7 +53,8 @@ The dataset is not in the repository (`data/` is git-ignored). It is **Plastic B
 `somaiya-vlmqe` on Roboflow Universe, licence CC BY 4.0:
 https://universe.roboflow.com/somaiya-vlmqe/plastic-bottle-2.0-psuby/dataset/2
 
-1. On that page, download the dataset in the **YOLOv8** format as a zip file (Roboflow may ask you to sign in).
+1. On that page, download the dataset in the **YOLOv8** format as a zip file. The download needs a free Roboflow
+   account: Roboflow asks you to sign in (or create an account) before it gives you the zip.
 2. Extract the zip into `data/raw/plastic-bottle-2.0-v2/`, so that this folder directly holds `train/`, `valid/`,
    `test/` and `data.yaml`. This is the folder written in `project.yaml` (`source: folder:`).
 3. Convert it by running the notebook `notebooks/02_my_dataset.ipynb` (kernel "Python (mai630)"), or from the terminal:
@@ -66,6 +67,9 @@ images. The conversion refuses to write into a folder that is not empty, so dele
 if you want to convert again. Never edit the files in it by hand.
 
 ## Train
+Training needs the converted dataset, so do the steps in Get the data first; without it, the page 2 · Training only
+says that the dataset folder does not exist yet.
+
 Start the app with `python app/app.py`, open the address it prints (usually http://127.0.0.1:7860) and go to the
 page **2 · Training**:
 1. Choose the training data (`all`, `half`, `one_class` or `large`); the page shows how many images that means.
