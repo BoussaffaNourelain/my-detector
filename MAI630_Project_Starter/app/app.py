@@ -1,7 +1,8 @@
-"""The app of my detector. Module 2 adds the tab "1 · Data", Module 3 the tab "2 · Training"; Module 4 adds more.
+"""The app of my detector. Module 2 adds the tab "1 · Data", Module 3 the tab "2 · Training", Module 4 the tab
+"3 · Detection & results" and the system status at the top.
 
-Run it from anywhere: python app/app.py. The dataset folder and runs/ are found next to the project.yaml it reads.
-See docs/data_spec.md and docs/train_spec.md.
+Run it from anywhere: python app/app.py. The dataset folder, runs/ and results/ are found next to the project.yaml it
+reads. See docs/data_spec.md, docs/train_spec.md and docs/detect_spec.md.
 """
 from __future__ import annotations
 
@@ -14,11 +15,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import gradio as gr                                             # noqa: E402
-import pandas as pd                                             # noqa: E402
+import numpy as np                                              # noqa: E402
+import pandas as pd                                            # noqa: E402
 from matplotlib.figure import Figure                           # noqa: E402
 
 from src import data as dt                                      # noqa: E402
+from src import detect as dc                                    # noqa: E402
 from src import train as tr                                     # noqa: E402
+from src.classical import load_rgb                              # noqa: E402
 
 # Trainings started from this app: run name -> {"process": Popen, "epochs": int}. Kept here, not in gr.State,
 # because Gradio copies State values and a process cannot be copied.
@@ -270,6 +274,135 @@ def _training_tab(root: Path, classes: list[str], project_path: Path) -> None:
     timer.tick(lambda n: poll_progress(runs, n), [run_name], [status, table, chart, timer, start])
 
 
+# ---------------------------------------------------------------- tab "3 · Detection & results" (docs/detect_spec.md)
+
+def results_dir(project_path: str | Path) -> Path:
+    """results/, next to project.yaml (not relative to the working directory)."""
+    return Path(project_path).resolve().parent / "results"
+
+
+MISSING = {
+    "data": "Prepare the dataset: run `notebooks/02_my_dataset.ipynb` (tab 1 · Data shows it).",
+    "training": "Train a model on the tab 2 · Training; a run is finished when `runs/<name>/weights/best.pt` exists.",
+    "results": "Evaluate a run: run `notebooks/03_my_results.ipynb`, which writes `results/thresholds.png`.",
+}
+
+
+def system_status(project: dict, project_path: str | Path) -> str:
+    """Markdown: which phases are ready (dc.system_check), and what to do for each one that is missing."""
+    check = dc.system_check(project, runs=runs_dir(project_path), results=results_dir(project_path))
+    names = {"data": "1 · Data", "training": "2 · Training", "results": "3 · Results"}
+    lines = ["**System status:** " + " · ".join(f"{'✅' if check[k] else '❌'} {names[k]}" for k in names)]
+    lines += [f"- {names[k]} is missing. {MISSING[k]}" for k in names if not check[k]]
+    return "\n".join(lines)
+
+
+def run_info(runs: list[dict], name: str | None) -> str:
+    """The chosen run's weights, mAP50 and why it was trained."""
+    run = next((r for r in runs if r["name"] == name), None)
+    if run is None:
+        return "Choose a run."
+    m = f"{run['mAP50']:.3f} (best validation mAP50 in results.csv)" if run["mAP50"] is not None \
+        else "unknown (no results.csv)"
+    why = run["why"].strip() or f"(no reason written yet: runs/{run['name']}_why.txt does not exist)"
+    return f"Weights: {run['weights']}\nmAP50: {m}\n\nWhy it was trained:\n{why}"
+
+
+def _weights_of(runs: list[dict], name: str | None) -> str | None:
+    return next((r["weights"] for r in runs if r["name"] == name), None)
+
+
+def filtered_view(rgb, preds, conf, classes: list[str]) -> tuple:
+    """The boxes kept at conf -> (drawn image, sentence, count table). Does not run the model."""
+    if rgb is None or preds is None:
+        return None, "Press Detect first.", None
+    kept = dc.keep(preds, float(conf))
+    counts = dc.count_by_label(kept, classes)
+    table = pd.DataFrame({"class": list(counts), "boxes": list(counts.values())})
+    return dc.draw(rgb, kept), dc.describe(kept, float(conf), classes), table
+
+
+def run_detection(runs: list[dict], root: Path, classes: list[str], name: str | None, source: str,
+                  upload, test_name: str | None, conf) -> tuple:
+    """Run the chosen model once on the chosen photo -> (rgb, all predictions, drawn image, sentence, table)."""
+    weights = _weights_of(runs, name)
+    if weights is None:
+        raise gr.Error("Choose a finished run first.")
+    if source == "Upload a photo":
+        if upload is None:
+            raise gr.Error("Upload a photo first.")
+        rgb = upload
+    else:
+        if not test_name:
+            raise gr.Error("Choose a test image first.")
+        rgb = load_rgb(root / "images" / "test" / test_name)
+    rgb = rgb[..., :3] if rgb.ndim == 3 else np.stack([rgb] * 3, axis=-1)   # drop alpha / grey -> 3 channels
+    preds = dc.predict(weights, rgb)
+    return (rgb, preds, *filtered_view(rgb, preds, conf, classes))
+
+
+def _module3_results(project_path: Path) -> None:
+    results = results_dir(project_path)
+    experiment = Path(project_path).resolve().parent / "docs" / "experiment.md"
+    for title, path in (("Precision and recall against the confidence threshold", results / "thresholds.png"),
+                        ("Example test images", results / "examples.png")):
+        gr.Markdown(f"#### {title}")
+        if path.is_file():
+            gr.Image(value=str(path), type="filepath", interactive=False, label=f"results/{path.name}")
+        else:
+            gr.Markdown(f"`results/{path.name}` does not exist yet. {MISSING['results']}")
+    gr.Markdown("#### My experiment (docs/experiment.md)")
+    gr.Markdown(experiment.read_text(encoding="utf-8") if experiment.is_file()
+                else "`docs/experiment.md` does not exist yet.")
+
+
+def _detection_tab(root: Path, project: dict, project_path: Path) -> None:
+    classes = project["classes"]
+    runs = dc.list_runs(runs_dir(project_path))
+
+    gr.Markdown("### 1. The model")
+    if not runs:
+        gr.Markdown("There is no finished run yet. Train one on the tab **2 · Training**: when it ends, its "
+                    "`runs/<name>/weights/best.pt` appears and the run can be chosen here (restart the app).")
+    else:
+        names = [r["name"] for r in runs]
+        run = gr.Dropdown(names, value=names[0], label="Finished run")
+        info = gr.Textbox(value=run_info(runs, names[0]), label="This run", lines=6, interactive=False)
+        run.change(lambda n: run_info(runs, n), [run], [info])
+
+        gr.Markdown("### 2. The photo")
+        tests = [p.name for p in _split_images(root, "test")]
+        source = gr.Radio(["Choose a test image", "Upload a photo"],
+                          value="Choose a test image" if tests else "Upload a photo", label="Photo")
+        with gr.Row():
+            test_name = gr.Dropdown(tests, value=tests[0] if tests else None, label=f"Test image ({len(tests)})",
+                                    filterable=True)
+            upload = gr.Image(type="numpy", label="Upload a photo", sources=["upload", "clipboard"])
+        detect = gr.Button("Detect", variant="primary")
+
+        gr.Markdown("### 3. The detections")
+        conf = gr.Slider(minimum=0.0, maximum=1.0, step=0.01, value=dc.default_conf(project),
+                         label=f"Confidence (starts at my threshold from Assignment 3.2: "
+                               f"{dc.default_conf(project):.2f})")
+        sentence = gr.Textbox(label="Result", interactive=False)
+        with gr.Row():
+            shown = gr.Image(type="numpy", interactive=False, label="Boxes at this confidence", scale=3)
+            counts = gr.Dataframe(label="Boxes per class", interactive=False, scale=1)
+        rgb_state, preds_state = gr.State(None), gr.State(None)
+
+        detect.click(lambda *a: run_detection(runs, root, classes, *a),
+                     [run, source, upload, test_name, conf], [rgb_state, preds_state, shown, sentence, counts])
+        conf.change(lambda r, p, c: filtered_view(r, p, c, classes), [rgb_state, preds_state, conf],
+                    [shown, sentence, counts], trigger_mode="always_last")
+        # a new run or photo makes the old boxes wrong: clear them until Detect is pressed again
+        for box in (run, source, upload, test_name):
+            box.change(lambda: (None, None, None, "Press Detect.", None), None,
+                       [rgb_state, preds_state, shown, sentence, counts])
+
+    gr.Markdown("### 4. The results of Module 3")
+    _module3_results(project_path)
+
+
 def build_app(project_path: str | Path = "project.yaml") -> gr.Blocks:
     """The Gradio app for the project described in project_path."""
     project_path = Path(project_path)
@@ -278,10 +411,13 @@ def build_app(project_path: str | Path = "project.yaml") -> gr.Blocks:
     root = dataset_dir(project_path, project)
     with gr.Blocks(title=f"My detector: {project['name']}") as demo:
         gr.Markdown(f"# My detector: {project['name']}\nClasses: {', '.join(classes)}")
+        gr.Markdown(system_status(project, project_path))
         with gr.Tab("1 · Data"):
             _data_tab(root, classes, project_path)
         with gr.Tab("2 · Training"):
             _training_tab(root, classes, project_path)
+        with gr.Tab("3 · Detection & results"):
+            _detection_tab(root, project, project_path)
     return demo
 
 

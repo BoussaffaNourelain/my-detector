@@ -7,3 +7,4 @@ classes: [plastic-bottle]            # must match the names in the export's data
 format: yolo                         # voc | coco | yolo  (how YOUR dataset writes its boxes)
 source:
   folder: data/raw/plastic-bottle-2.0-v2   # the folder that holds train/ valid/ test/
+threshold: 0.25                      # confidence threshold I chose in Assignment 3.2
